@@ -582,7 +582,9 @@ MonoBehaviour:
   sequenceGap: 0.15
   maskAlpha: 0.35
   maskVisible: 1
+
   themeOverride: {fileID: 0}
+
 --- !u!4 &1569723680
 Transform:
   m_ObjectHideFlags: 0

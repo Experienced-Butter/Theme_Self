@@ -83,6 +83,7 @@ namespace CardGame.UI
 
         private Color _baseColor = Color.white;   // 实体固有色（创建时传入）
 
+
         // 美术资源接入：头像图 + 着色；为空时用程序生成的圆形占位
         private Sprite _avatarSprite;
         private Color _avatarTint = Color.white;
@@ -90,6 +91,7 @@ namespace CardGame.UI
         // 血条颜色覆盖（主题配置用）；未覆盖时按阵营固有色
         private bool _hasBarColorOverride;
         private Color _barColorOverride = Color.white;
+
         private string _displayName = string.Empty;
         private bool _alive = true;
         private bool _highlighted;
@@ -372,6 +374,7 @@ namespace CardGame.UI
             get { return _hpFillRect != null && _hpSlot != null; }
         }
 
+
         /// <summary>
         /// 设置头像美术（美术资源接入点）。
         ///
@@ -400,6 +403,7 @@ namespace CardGame.UI
             _barColorOverride = color;
             SetHp(_hpCurrent, _hpMax, _alive);
         }
+
 
         public void SetHp(int current, int max, bool alive)
         {
@@ -440,6 +444,7 @@ namespace CardGame.UI
 
             if (_body != null)
             {
+
                 // 有美术图时不染色（用 tint，白 = 原色），没图时用实体固有色画圆形占位
                 Color bodyBase = _avatarSprite != null ? _avatarTint : _baseColor;
                 _body.color = Dim(alive ? bodyBase : Grayscale(bodyBase), fade);
@@ -582,11 +587,13 @@ namespace CardGame.UI
         /// 血条填充色**按阵营区分**：玩家蓝、敌人红（用户口径）。
         /// 取实体固有色 <see cref="_baseColor"/>（模块创建时玩家传蓝、敌人传红），
         /// 残血时略微压暗以保留一点「血量告急」的观感，但不改变色相。
+
         /// 主题配置可用 <see cref="SetBarColorOverride"/> 覆盖它。
         /// </summary>
         private Color BarColor(float ratio)
         {
             Color bar = _hasBarColorOverride ? _barColorOverride : _baseColor;
+
             float dim = Mathf.Lerp(0.62f, 1f, Mathf.Clamp01(ratio));
             return new Color(bar.r * dim, bar.g * dim, bar.b * dim, 1f);
         }

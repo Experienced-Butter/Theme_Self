@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using CardGame.Bootstrap;
 using CardGame.Cards;
 using CardGame.Combat;
+
 using CardGame.Config;
+
 using CardGame.Controllers;
 using CardGame.Core;
 using CardGame.Monsters;
@@ -51,6 +53,7 @@ namespace CardGame.UI
         [Range(0f, 1f)] public float maskAlpha = 0.35f;
         public bool maskVisible = true;
 
+
         [Header("关卡主题（留空 = 按关卡自动加载 Resources/CardGameThemes 下的配置）")]
         [Tooltip("一般留空。留空时按 level 自动找 Theme_Level1 / Theme_Level2 / Theme_SideQuest；"
                  + "想临时试某一套主题就把它拖进来。")]
@@ -58,6 +61,7 @@ namespace CardGame.UI
 
         // 本局实际使用的主题（null = 没有配置，全部走程序生成的占位外观）
         private BattleTheme _theme;
+
 
         // ---- 图层 ----
         private Canvas _canvas;
@@ -126,11 +130,13 @@ namespace CardGame.UI
         private const float CardRowY = 150f;
         private const float PlayerX = -620f;
 
+
         // 敌人横向排布参数（见 LayoutEnemyRow 的几何说明）
         private const float EnemyRowCenterX = 400f;
         private const float EnemyRowY = -140f;
         private const float EnemyRowGap = 30f;
         private const float EnemyRowRightLimit = 930f;
+
 
         private void Start()
         {
@@ -182,9 +188,11 @@ namespace CardGame.UI
             _battleEnded = false;
             _running = true;
 
+
             // 主题必须在建 UI **之前**解析：实体形象的尺寸参与了内部布局计算，
             // 建完再去改尺寸会把名称/血条/HP 文本的位置算错。
             _theme = themeOverride != null ? themeOverride : BattleThemeLibrary.Load(level);
+
 
             BuildUi();
             StartCoroutine(EnterSequence());
@@ -275,8 +283,10 @@ namespace CardGame.UI
             // ① 背景（固定最下层）
             _layerBackground = BattleUiKit.CreateLayer(root, "Layer_Background");
             _backgroundImage = _layerBackground.gameObject.AddComponent<Image>();
+
             _backgroundImage.raycastTarget = false;
             ApplyThemeBackground();
+
             BuildBackgroundDecor(_layerBackground);
 
             // ② 玩家（左）与敌人（右）
@@ -307,6 +317,7 @@ namespace CardGame.UI
             _layerOverlay = BattleUiKit.CreateLayer(root, "Layer_Overlay");
             BuildOverlay(_layerOverlay);
         }
+
 
         /// <summary>
         /// 背景美术接入点：
@@ -355,6 +366,7 @@ namespace CardGame.UI
                 return;
             }
 
+
             BattleUiKit.CreateImage("TopBand", parent, new Color(1f, 1f, 1f, 0.04f),
                 new Vector2(1920f, 8f), new Vector2(0f, 420f)).raycastTarget = false;
             BattleUiKit.CreateImage("FloorBand", parent, new Color(0.15f, 0.18f, 0.26f, 1f),
@@ -367,6 +379,7 @@ namespace CardGame.UI
 
         private void BuildPlayerView(RectTransform parent)
         {
+
             // 玩家实体形象：头像 + 名称 + 血条，内部布局由 BattleEntityView 负责。
             // 尺寸与配色来自关卡主题（没有主题时用默认值）。
             Vector2 size = _theme != null ? _theme.playerSize : new Vector2(260f, 330f);
@@ -380,6 +393,7 @@ namespace CardGame.UI
                 _playerView.SetBarColorOverride(_theme.playerBarColor);
             }
 
+
             _playerRect = _playerView.Rect;
         }
 
@@ -389,6 +403,7 @@ namespace CardGame.UI
             _enemyViews.Clear();
             _lastEnemyHp.Clear();
             _enemyHpDisplay.Clear();
+
 
             Vector2 size = _theme != null ? _theme.monsterSize : new Vector2(220f, 300f);
             Color tint = _theme != null ? _theme.monsterBarColor : new Color(0.85f, 0.32f, 0.28f, 1f);
@@ -410,11 +425,13 @@ namespace CardGame.UI
                     view.SetBarColorOverride(_theme.monsterBarColor);
                 }
 
+
                 _enemyRects.Add(view.Rect);
                 _enemyViews.Add(view);
                 _lastEnemyHp.Add(int.MinValue);
                 _enemyHpDisplay.Add(new HpDisplay());
             }
+
 
             LayoutEnemyRow(count);
         }
@@ -479,6 +496,7 @@ namespace CardGame.UI
                 float x = centerX + (i - (usedCount - 1) * 0.5f) * spacing;
                 rect.anchoredPosition = new Vector2(x, EnemyRowY);
             }
+
         }
 
         private void BuildOverlay(RectTransform parent)
@@ -567,8 +585,10 @@ namespace CardGame.UI
                     continue;   // 本关没用到的占位敌人：不参与滑入
                 }
                 Vector2 target = enemy.anchoredPosition;
+
                 // 每只怪按**自己**的目标 x 从右侧滑入（横向排布后各只 x 不同）
                 StartCoroutine(SlideAnchored(enemy, new Vector2(target.x + 900f, target.y), target, entitySlideDuration));
+
             }
             yield return new WaitForSeconds(entitySlideDuration);
 
@@ -651,8 +671,10 @@ namespace CardGame.UI
                 }
             }
 
+
             // 现在才知道本关真正出场几只 ⇒ 按实际只数重新横向居中排布
             LayoutEnemyRow(_enemyTargets.Count);
+
 
             SubscribeBattleEffects();
 
@@ -1552,6 +1574,7 @@ namespace CardGame.UI
             return Mathf.RoundToInt(display.shown);
         }
 
+
         /// <summary>
         /// 本场战斗结束（胜负已定、横幅已弹出）时触发，参数 = 玩家是否获胜。
         ///
@@ -1574,6 +1597,7 @@ namespace CardGame.UI
             get { return _battleEnded && _playerWon; }
         }
 
+
         private void HandleBattleEnded(bool victory)
         {
             _battleEnded = true;
@@ -1581,10 +1605,12 @@ namespace CardGame.UI
             RefreshHud();
             ShowResult(victory);
 
+
             if (BattleEnded != null)
             {
                 BattleEnded(victory);
             }
+
         }
 
         private void ShowResult(bool playerWon)
@@ -1625,6 +1651,7 @@ namespace CardGame.UI
         /// <summary>
         /// 「继续」被点击时触发，供**上层游戏流程**接管。
         ///
+
         /// 语义：本模块会被嵌进一个完整的游戏流程里当作其中一个环节，「继续」的含意是
         /// 「进入流程的下一个环节」—— 它**不再自己开一轮新对局**（开新对局是「再来一局」的职责）。
         ///
@@ -1639,6 +1666,7 @@ namespace CardGame.UI
         /// module.EnterBattle();
         /// </code>
         /// 没有订阅者时（当前独立验收状态），只把横幅收起来并给出状态行提示，绝不会自行开新局。
+
         /// </summary>
         public event System.Action ContinueRequested;
 
