@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using CardGame.Bootstrap;
 using CardGame.Cards;
 using CardGame.Combat;
+
+using CardGame.Config;
+
 using CardGame.Controllers;
 using CardGame.Core;
 using CardGame.Monsters;
@@ -49,6 +52,16 @@ namespace CardGame.UI
         [Header("遮罩")]
         [Range(0f, 1f)] public float maskAlpha = 0.35f;
         public bool maskVisible = true;
+
+
+        [Header("关卡主题（留空 = 按关卡自动加载 Resources/CardGameThemes 下的配置）")]
+        [Tooltip("一般留空。留空时按 level 自动找 Theme_Level1 / Theme_Level2 / Theme_SideQuest；"
+                 + "想临时试某一套主题就把它拖进来。")]
+        public BattleTheme themeOverride;
+
+        // 本局实际使用的主题（null = 没有配置，全部走程序生成的占位外观）
+        private BattleTheme _theme;
+
 
         // ---- 图层 ----
         private Canvas _canvas;
@@ -116,7 +129,14 @@ namespace CardGame.UI
         private const float CardSlotSpacing = 168f;
         private const float CardRowY = 150f;
         private const float PlayerX = -620f;
-        private const float EnemyX = 620f;
+
+
+        // 敌人横向排布参数（见 LayoutEnemyRow 的几何说明）
+        private const float EnemyRowCenterX = 400f;
+        private const float EnemyRowY = -140f;
+        private const float EnemyRowGap = 30f;
+        private const float EnemyRowRightLimit = 930f;
+
 
         private void Start()
         {
@@ -167,6 +187,12 @@ namespace CardGame.UI
             StopAllCoroutines();
             _battleEnded = false;
             _running = true;
+
+
+            // 主题必须在建 UI **之前**解析：实体形象的尺寸参与了内部布局计算，
+            // 建完再去改尺寸会把名称/血条/HP 文本的位置算错。
+            _theme = themeOverride != null ? themeOverride : BattleThemeLibrary.Load(level);
+
 
             BuildUi();
             StartCoroutine(EnterSequence());
@@ -257,9 +283,10 @@ namespace CardGame.UI
             // ① 背景（固定最下层）
             _layerBackground = BattleUiKit.CreateLayer(root, "Layer_Background");
             _backgroundImage = _layerBackground.gameObject.AddComponent<Image>();
-            _backgroundImage.sprite = BattleUiKit.WhiteSprite;
-            _backgroundImage.color = new Color(0.09f, 0.11f, 0.17f, 1f);
+
             _backgroundImage.raycastTarget = false;
+            ApplyThemeBackground();
+
             BuildBackgroundDecor(_layerBackground);
 
             // ② 玩家（左）与敌人（右）
@@ -291,9 +318,55 @@ namespace CardGame.UI
             BuildOverlay(_layerOverlay);
         }
 
+
+        /// <summary>
+        /// 背景美术接入点：
+        ///   · 主题里填了背景图 → 用图，颜色乘 <c>backgroundTint</c>（默认白 = 原图不变色）；
+        ///   · 没填 → 退回程序生成的纯色背景，颜色取 <c>proceduralBackgroundColor</c>。
+        /// 这两种颜色**刻意分开**：以前共用一个字段时，一旦接入背景图，那个本该给纯色底用的
+        /// 深蓝会直接乘到美术图上，把图压成近乎全黑（真机踩到过）。
+        /// 图片按「铺满全屏」显示（不保持比例），所以美术请按 16:9 出图（建议 1920×1080）。
+        /// </summary>
+        private void ApplyThemeBackground()
+        {
+            if (_backgroundImage == null)
+            {
+                return;
+            }
+
+            _backgroundImage.type = Image.Type.Simple;
+            _backgroundImage.preserveAspect = false;
+
+            if (_theme == null)
+            {
+                _backgroundImage.sprite = BattleUiKit.WhiteSprite;
+                _backgroundImage.color = new Color(0.09f, 0.11f, 0.17f, 1f);
+                return;
+            }
+
+            if (_theme.backgroundSprite == null)
+            {
+                _backgroundImage.sprite = BattleUiKit.WhiteSprite;
+                _backgroundImage.color = _theme.proceduralBackgroundColor;
+                return;
+            }
+
+            _backgroundImage.sprite = _theme.backgroundSprite;
+            _backgroundImage.color = _theme.backgroundTint;   // 默认白，原图不变色
+        }
+
         private void BuildBackgroundDecor(RectTransform parent)
         {
-            // 纯程序生成的装饰（不依赖美术资源）：上下两条色带 + 标题
+            // 纯程序生成的装饰（不依赖美术资源）：上下两条色带 + 标题。
+            // 主题里如果提供了背景图并且关掉了 keepProceduralDecor，就直接不建这些 ——
+            // 用「不创建」而不是「创建后隐藏」，避免它们叠在美术背景上还得逐个清理。
+            bool useDecor = _theme == null || _theme.keepProceduralDecor || _theme.backgroundSprite == null;
+            if (!useDecor)
+            {
+                return;
+            }
+
+
             BattleUiKit.CreateImage("TopBand", parent, new Color(1f, 1f, 1f, 0.04f),
                 new Vector2(1920f, 8f), new Vector2(0f, 420f)).raycastTarget = false;
             BattleUiKit.CreateImage("FloorBand", parent, new Color(0.15f, 0.18f, 0.26f, 1f),
@@ -306,9 +379,21 @@ namespace CardGame.UI
 
         private void BuildPlayerView(RectTransform parent)
         {
-            // 玩家实体形象：圆形头像 + 名称 + 血条，内部布局由 BattleEntityView 负责
-            _playerView = BattleEntityView.Create(parent, "玩家", new Color(0.22f, 0.52f, 0.95f, 1f),
-                new Vector2(260f, 330f), new Vector2(PlayerX, -50f));
+
+            // 玩家实体形象：头像 + 名称 + 血条，内部布局由 BattleEntityView 负责。
+            // 尺寸与配色来自关卡主题（没有主题时用默认值）。
+            Vector2 size = _theme != null ? _theme.playerSize : new Vector2(260f, 330f);
+            Color tint = _theme != null ? _theme.playerBarColor : new Color(0.22f, 0.52f, 0.95f, 1f);
+
+            _playerView = BattleEntityView.Create(parent, "玩家", tint, size, new Vector2(PlayerX, -50f));
+
+            if (_theme != null)
+            {
+                _playerView.SetAvatarArt(_theme.playerSprite, _theme.playerTint);
+                _playerView.SetBarColorOverride(_theme.playerBarColor);
+            }
+
+
             _playerRect = _playerView.Rect;
         }
 
@@ -319,19 +404,99 @@ namespace CardGame.UI
             _lastEnemyHp.Clear();
             _enemyHpDisplay.Clear();
 
+
+            Vector2 size = _theme != null ? _theme.monsterSize : new Vector2(220f, 300f);
+            Color tint = _theme != null ? _theme.monsterBarColor : new Color(0.85f, 0.32f, 0.28f, 1f);
+
             // 先按关卡放置「最多 3 个」占位敌人，开战后按实际敌人数量启用/停用并刷新数值
-            int count = 3;
+            int count = BattleTheme.MaxMonsters;
             for (int i = 0; i < count; i++)
             {
-                float y = count == 1 ? -50f : (150f - i * 210f);
-                BattleEntityView view = BattleEntityView.Create(parent, "敌人" + (i + 1),
-                    new Color(0.85f, 0.32f, 0.28f, 1f), new Vector2(220f, 300f), new Vector2(EnemyX, y));
+                BattleEntityView view = BattleEntityView.Create(parent, "敌人" + (i + 1), tint, size,
+                    Vector2.zero);
+
+                if (_theme != null)
+                {
+                    // 按**出场顺序**取图：第 i 只怪用 monsterSprites[i]；每只可以是不同的图
+                    Sprite sprite = _theme.monsterSprites != null && i < _theme.monsterSprites.Length
+                        ? _theme.monsterSprites[i]
+                        : null;
+                    view.SetAvatarArt(sprite, MonsterTintAt(i));
+                    view.SetBarColorOverride(_theme.monsterBarColor);
+                }
+
 
                 _enemyRects.Add(view.Rect);
                 _enemyViews.Add(view);
                 _lastEnemyHp.Add(int.MinValue);
                 _enemyHpDisplay.Add(new HpDisplay());
             }
+
+
+            LayoutEnemyRow(count);
+        }
+
+        /// <summary>第 i 只怪物用哪个着色：优先「每只单独着色」，没设过就退回统一着色。</summary>
+        private Color MonsterTintAt(int index)
+        {
+            if (_theme == null)
+            {
+                return Color.white;
+            }
+
+            if (_theme.monsterTints != null && index < _theme.monsterTints.Length)
+            {
+                Color perMonster = _theme.monsterTints[index];
+                if (perMonster.a > 0f)     // alpha=0 视为「这一格没填」
+                {
+                    return perMonster;
+                }
+            }
+
+            return _theme.monsterTint;
+        }
+
+        /// <summary>
+        /// 敌人**横向**排成一行（用户要求：怪物横置排列）。
+        ///
+        /// 几何约束（1920×1080 参考分辨率，画布 x∈[-960,960]）：
+        ///   · 手牌行居中在 y=150、高 210 ⇒ 占 y∈[45,255]，所以怪物的**顶边必须低于 45**，
+        ///     整排中心取 y=-140（怪物 300 高 ⇒ 占 y∈[-290,10]），与手牌完全不重叠；
+        ///   · 玩家占 x∈[-750,-490]，整排的左边界控制在 x≥0 附近，避免和玩家贴住；
+        ///   · 间距由形象宽度推导（宽度 + 30 的缝），换更大的皮也不会互相压住；
+        ///   · 整排超出右边界时整体左移，保证不飞出画面。
+        /// usedCount 是**实际出场**的只数，所以 1/2/3 只都会各自居中排好，不会留半边空位。
+        /// </summary>
+        private void LayoutEnemyRow(int usedCount)
+        {
+            if (usedCount <= 0 || _enemyRects.Count == 0)
+            {
+                return;
+            }
+
+            RectTransform first = _enemyRects[0];
+            float width = first != null && first.sizeDelta.x > 1f ? first.sizeDelta.x : 220f;
+            float spacing = width + EnemyRowGap;
+            float totalWidth = spacing * (usedCount - 1) + width;
+
+            float centerX = EnemyRowCenterX;
+            float right = centerX + totalWidth * 0.5f;
+            if (right > EnemyRowRightLimit)
+            {
+                centerX -= right - EnemyRowRightLimit;
+            }
+
+            for (int i = 0; i < usedCount && i < _enemyRects.Count; i++)
+            {
+                RectTransform rect = _enemyRects[i];
+                if (rect == null)
+                {
+                    continue;
+                }
+                float x = centerX + (i - (usedCount - 1) * 0.5f) * spacing;
+                rect.anchoredPosition = new Vector2(x, EnemyRowY);
+            }
+
         }
 
         private void BuildOverlay(RectTransform parent)
@@ -420,7 +585,10 @@ namespace CardGame.UI
                     continue;   // 本关没用到的占位敌人：不参与滑入
                 }
                 Vector2 target = enemy.anchoredPosition;
-                StartCoroutine(SlideAnchored(enemy, new Vector2(EnemyX + 900f, target.y), target, entitySlideDuration));
+
+                // 每只怪按**自己**的目标 x 从右侧滑入（横向排布后各只 x 不同）
+                StartCoroutine(SlideAnchored(enemy, new Vector2(target.x + 900f, target.y), target, entitySlideDuration));
+
             }
             yield return new WaitForSeconds(entitySlideDuration);
 
@@ -502,6 +670,11 @@ namespace CardGame.UI
                     _enemyViews[i].SetName(_enemyTargets[i].displayName);
                 }
             }
+
+
+            // 现在才知道本关真正出场几只 ⇒ 按实际只数重新横向居中排布
+            LayoutEnemyRow(_enemyTargets.Count);
+
 
             SubscribeBattleEffects();
 
@@ -1401,12 +1574,43 @@ namespace CardGame.UI
             return Mathf.RoundToInt(display.shown);
         }
 
+
+        /// <summary>
+        /// 本场战斗结束（胜负已定、横幅已弹出）时触发，参数 = 玩家是否获胜。
+        ///
+        /// 给**上层游戏流程**用：它通常只关心「这一关过了没有」，不必去订阅
+        /// GameController.OnBattleEnded（那是引擎层的事件，还牵扯控制器实例）。
+        /// 注意：此刻横幅已经弹出，玩家接下来会点「再来一局」或「继续」；
+        /// 上层想接住「继续」，订阅 <see cref="ContinueRequested"/>。
+        /// </summary>
+        public event System.Action<bool> BattleEnded;
+
+        /// <summary>本场战斗是否已经结束（横幅已弹出）。</summary>
+        public bool IsBattleEnded
+        {
+            get { return _battleEnded; }
+        }
+
+        /// <summary>战斗结束时玩家是否获胜（战斗未结束时为 false）。</summary>
+        public bool PlayerWon
+        {
+            get { return _battleEnded && _playerWon; }
+        }
+
+
         private void HandleBattleEnded(bool victory)
         {
             _battleEnded = true;
             _playerWon = victory;
             RefreshHud();
             ShowResult(victory);
+
+
+            if (BattleEnded != null)
+            {
+                BattleEnded(victory);
+            }
+
         }
 
         private void ShowResult(bool playerWon)
@@ -1447,9 +1651,22 @@ namespace CardGame.UI
         /// <summary>
         /// 「继续」被点击时触发，供**上层游戏流程**接管。
         ///
-        /// 语义：本模块将来会被嵌进一个完整的游戏流程里当作其中一个环节，「继续」的含意是
+
+        /// 语义：本模块会被嵌进一个完整的游戏流程里当作其中一个环节，「继续」的含意是
         /// 「进入流程的下一个环节」—— 它**不再自己开一轮新对局**（开新对局是「再来一局」的职责）。
-        /// 上层要接管，订阅本事件即可；当前没有上层流程时，只把横幅收起来并给出提示。
+        ///
+        /// 推荐的接法（上层流程）：
+        /// <code>
+        /// module.BattleEnded     += won =&gt; { 记录战绩 / 解锁下一关 };   // 先知道输赢
+        /// module.ContinueRequested += () =&gt; {
+        ///     幕后流程推进到下一环节；           // 例如加载剧情、切场景、回大地图
+        ///     module.gameObject.SetActive(false); // 收起本模块（或 Destroy）
+        /// };
+        /// module.level = LevelId.Level2;          // 想让哪一关出牌就设哪个 level
+        /// module.EnterBattle();
+        /// </code>
+        /// 没有订阅者时（当前独立验收状态），只把横幅收起来并给出状态行提示，绝不会自行开新局。
+
         /// </summary>
         public event System.Action ContinueRequested;
 
